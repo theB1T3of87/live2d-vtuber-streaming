@@ -56,6 +56,11 @@
           <label for="zoomRange">Zoom</label>
           <input id="zoomRange" type="range" min="50" max="160" value="100">
         </div>
+        <div class="cameraControls">
+          <button id="cameraBtn">Ativar câmera</button>
+          <p id="cameraStatus">Câmera desligada</p>
+          <video id="cameraVideo" autoplay playsinline muted hidden></video>
+        </div>
 
         <button id="reloadBtn">⟳ Recarregar modelo</button>
         <button id="backBtn" class="secondary">← Voltar</button>

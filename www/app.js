@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 
 import { CubismFramework } from "./libs/cubism-framework/live2dcubismframework.js";
 import { CubismMoc } from "./libs/cubism-framework/model/cubismmoc.js";
@@ -18,6 +19,9 @@ const status = $("status");
 const details = $("details");
 const canvas = $("live2dCanvas");
 const zoomRange = $("zoomRange");
+const cameraBtn = $("cameraBtn");
+const cameraStatus = $("cameraStatus");
+const cameraVideo = $("cameraVideo");
 
 let modelPackage = null;
 let modelConfig = null;
@@ -32,6 +36,12 @@ let gl = null;
 let animationFrame = null;
 let textures = [];
 let zoom = 1;
+
+let faceLandmarker = null;
+let cameraStream = null;
+let lastVideoTime = -1;
+let faceNeutral = null;
+let parameterIndices = new Map();
 
 function normalizePath(path) {
   const parts = [];
@@ -353,6 +363,15 @@ async function createLive2D() {
     throw new Error("Não foi possível criar o modelo Live2D.");
   }
 
+  parameterIndices.clear();
+
+  for (let i = 0; i < model.getParameterCount(); i++) {
+    const id = model.getParameterId(i).getString();
+    parameterIndices.set(id, i);
+  }
+
+  faceNeutral = null;
+
   modelMatrix = new CubismModelMatrix(
     model.getCanvasWidth(),
     model.getCanvasHeight()
@@ -385,6 +404,197 @@ async function createLive2D() {
   renderLoop();
 }
 
+
+function setTrackedParameter(id, value, weight = 0.4) {
+  if (!model || !parameterIndices.has(id)) return;
+
+  const index = parameterIndices.get(id);
+  model.setParameterValueByIndex(index, value, weight);
+}
+
+function applyFaceTracking() {
+  if (
+    !faceLandmarker ||
+    !cameraStream ||
+    cameraVideo.readyState < 2 ||
+    cameraVideo.currentTime === lastVideoTime
+  ) return;
+
+  lastVideoTime = cameraVideo.currentTime;
+
+  const result = faceLandmarker.detectForVideo(
+    cameraVideo,
+    performance.now()
+  );
+
+  if (!result.faceLandmarks?.length) {
+    cameraStatus.textContent = "Câmera ativa — procurando rosto...";
+    return;
+  }
+
+  const points = result.faceLandmarks[0];
+
+  const leftEye = points[33];
+  const rightEye = points[263];
+  const nose = points[1];
+
+  if (!leftEye || !rightEye || !nose) return;
+
+  const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+  const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+
+  const eyeDistance = Math.max(
+    Math.hypot(
+      rightEye.x - leftEye.x,
+      rightEye.y - leftEye.y
+    ),
+    0.001
+  );
+
+  const yaw = (nose.x - eyeCenterX) / eyeDistance;
+  const pitch = (nose.y - eyeCenterY) / eyeDistance;
+
+  if (!faceNeutral) {
+    faceNeutral = { yaw, pitch };
+  }
+
+  const roll = Math.atan2(
+    rightEye.y - leftEye.y,
+    rightEye.x - leftEye.x
+  ) * 180 / Math.PI;
+
+  setTrackedParameter(
+    "ParamAngleX",
+    (yaw - faceNeutral.yaw) * 90
+  );
+
+  setTrackedParameter(
+    "ParamAngleY",
+    (pitch - faceNeutral.pitch) * 60
+  );
+
+  setTrackedParameter("ParamAngleZ", roll);
+
+  const categories =
+    result.faceBlendshapes?.[0]?.categories || [];
+
+  const expressions = {};
+
+  for (const item of categories) {
+    expressions[item.categoryName] = item.score;
+  }
+
+  if (expressions.eyeBlinkLeft !== undefined) {
+    setTrackedParameter(
+      "ParamEyeLOpen",
+      1 - expressions.eyeBlinkLeft
+    );
+  }
+
+  if (expressions.eyeBlinkRight !== undefined) {
+    setTrackedParameter(
+      "ParamEyeROpen",
+      1 - expressions.eyeBlinkRight
+    );
+  }
+
+  if (expressions.jawOpen !== undefined) {
+    setTrackedParameter(
+      "ParamMouthOpenY",
+      expressions.jawOpen
+    );
+  }
+
+  cameraStatus.textContent = "Câmera ativa — rosto detectado";
+}
+
+async function stopCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+
+  cameraVideo.pause();
+  cameraVideo.srcObject = null;
+
+  if (faceLandmarker) {
+    faceLandmarker.close();
+    faceLandmarker = null;
+  }
+
+  lastVideoTime = -1;
+  faceNeutral = null;
+
+  cameraBtn.textContent = "Ativar câmera";
+  cameraStatus.textContent = "Câmera desligada";
+}
+
+async function startCamera() {
+  cameraBtn.disabled = true;
+  cameraStatus.textContent = "Inicializando MediaPipe...";
+
+  try {
+    const vision = await FilesetResolver.forVisionTasks(
+      new URL("./mediapipe/", window.location.href).href
+    );
+
+    faceLandmarker = await FaceLandmarker.createFromOptions(
+      vision,
+      {
+        baseOptions: {
+          modelAssetPath: new URL(
+            "./mediapipe/face_landmarker.task",
+            window.location.href
+          ).href,
+          delegate: "CPU"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        outputFaceBlendshapes: true
+      }
+    );
+
+    cameraStatus.textContent = "Solicitando acesso à câmera...";
+
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      }
+    });
+
+    cameraVideo.srcObject = cameraStream;
+    await cameraVideo.play();
+
+    lastVideoTime = -1;
+    faceNeutral = null;
+
+    cameraBtn.textContent = "Desativar câmera";
+    cameraStatus.textContent = "Câmera ativa — procurando rosto...";
+
+  } catch (error) {
+    console.error("Erro na câmera:", error);
+
+    await stopCamera();
+
+    cameraStatus.textContent =
+      "Erro na câmera: " + error.message;
+
+  } finally {
+    cameraBtn.disabled = false;
+  }
+}
+
+cameraBtn.addEventListener("click", async () => {
+  if (cameraStream) {
+    await stopCamera();
+  } else {
+    await startCamera();
+  }
+});
+
 function renderLoop() {
   if (!gl || !renderer || !model) return;
 
@@ -393,6 +603,7 @@ function renderLoop() {
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
+  applyFaceTracking();
   model.update();
 
   modelMatrix.setWidth(2.0 / zoom);
@@ -432,6 +643,7 @@ readyBtn.addEventListener("click", async () => {
 });
 
 backBtn.addEventListener("click", async () => {
+  await stopCamera();
   await destroyRenderer();
 
   renderScreen.hidden = true;
