@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#17131f">
+  <title>Bite VTuber Studio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <section id="importScreen">
+    <header>
+      <div class="brand">BITE <span>VTUBER STUDIO</span></div>
+      <p>Seu próprio estúdio virtual.</p>
+    </header>
+
+    <main>
+      <section class="viewer">
+        <div class="avatar">
+          <div id="placeholder">👾</div>
+          <img id="modelPreview" alt="Prévia do modelo" hidden>
+          <p id="modelName">Nenhum modelo carregado</p>
+        </div>
+      </section>
+
+      <section class="controls">
+        <button id="importBtn">＋ Importar modelo Live2D</button>
+        <input type="file" id="modelInput" accept=".zip,application/zip" hidden>
+
+        <p id="status">Aguardando modelo...</p>
+        <div id="details"></div>
+
+        <button id="readyBtn" disabled>Tudo pronto! →</button>
+      </section>
+    </main>
+  </section>
+
+  <section id="renderScreen" hidden>
+    <header class="studioHeader">
+      <div>
+        <div class="brand">BITE <span>STUDIO</span></div>
+        <p id="studioModelName">Live2D Studio</p>
+      </div>
+      <span id="renderStatus">Preparando...</span>
+    </header>
+
+    <main class="studioMain">
+      <section class="renderViewer">
+        <canvas id="live2dCanvas"></canvas>
+        <div id="renderPlaceholder">👾</div>
+      </section>
+
+      <section class="studioControls">
+        <div class="controlGroup">
+          <label for="zoomRange">Zoom</label>
+          <input id="zoomRange" type="range" min="50" max="160" value="100">
+        </div>
+
+        <button id="reloadBtn">⟳ Recarregar modelo</button>
+        <button id="backBtn" class="secondary">← Voltar</button>
+      </section>
+    </main>
+  </section>
+
+  <script src="libs/live2dcubismcore.min.js"></script>
+  <script type="module" src="app.bundle.js"></script>
+</body>
+</html>

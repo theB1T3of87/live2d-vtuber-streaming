@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Live2D Vtuber Streaming</string>
+    <string name="title_activity_main">Live2D Vtuber Streaming</string>
+    <string name="package_name">com.theb1t3of87.live2dvtuberstreaming</string>
+    <string name="custom_url_scheme">com.theb1t3of87.live2dvtuberstreaming</string>
+</resources>

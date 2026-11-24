@@ -1,0 +1,10 @@
+node_modules/
+.gradle/
+local.properties
+build/
+*.apk
+*.aab
+www-backup/
+teste-esbuild/
+package.json.bak
+package-rollup-backup.json

@@ -1,0 +1,221 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+  --background: #17131f;
+  --panel: #241d30;
+  --border: #58466e;
+  --purple: #c6a5ed;
+  --accent: #9b75c5;
+  --muted: #aaa0b8;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--background);
+  color: #eee8f7;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+header {
+  padding: 24px 16px;
+}
+
+.brand {
+  color: var(--purple);
+  font-size: 23px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+
+.brand span {
+  color: #eee8f7;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+header p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.viewer {
+  margin: 16px;
+  min-height: 340px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.avatar {
+  padding: 20px;
+  width: 100%;
+}
+
+#placeholder {
+  font-size: 75px;
+}
+
+#modelPreview {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  margin: auto;
+}
+
+.avatar p,
+#renderModelName {
+  color: var(--purple);
+  overflow-wrap: anywhere;
+}
+
+.controls {
+  padding: 20px;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 15px 22px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  margin: 8px;
+}
+
+button:active {
+  background: #76539e;
+}
+
+button:disabled {
+  background: #51445f;
+  color: var(--muted);
+  opacity: .6;
+}
+
+#readyBtn {
+  display: block;
+  width: 85%;
+  max-width: 320px;
+  margin: 24px auto;
+}
+
+#status {
+  color: var(--purple);
+  margin-top: 20px;
+  overflow-wrap: anywhere;
+}
+
+#details {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#details p {
+  margin: 5px;
+}
+
+.studioHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  gap: 10px;
+  padding: 18px;
+}
+
+.studioHeader p {
+  margin: 6px 0 0;
+}
+
+#renderStatus {
+  color: var(--purple);
+  font-size: 11px;
+  max-width: 110px;
+  overflow-wrap: anywhere;
+}
+
+.studioMain {
+  padding: 0 12px 24px;
+}
+
+.renderViewer {
+  position: relative;
+  width: 100%;
+  height: 65vh;
+  min-height: 350px;
+  max-height: 700px;
+  background:
+    radial-gradient(ellipse at center, #382b49 0%, #241d30 65%, #1b1624 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+#live2dCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#renderPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 75px;
+  pointer-events: none;
+}
+
+.studioControls {
+  margin-top: 16px;
+  padding: 15px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.controlGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+  color: var(--purple);
+  font-size: 13px;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.secondary {
+  background: #40344e;
+}
+
+@media (max-width: 400px) {
+  .brand {
+    font-size: 19px;
+  }
+
+  .renderViewer {
+    height: 62vh;
+  }
+}
