@@ -1,4 +1,7 @@
 import JSZip from "jszip";
+import { registerPlugin } from "@capacitor/core";
+
+const ScreenRecorder = registerPlugin("ScreenRecorder");
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 
 import { CubismFramework } from "./libs/cubism-framework/live2dcubismframework.js";
@@ -22,6 +25,12 @@ const zoomRange = $("zoomRange");
 const cameraBtn = $("cameraBtn");
 const cameraStatus = $("cameraStatus");
 const cameraVideo = $("cameraVideo");
+const recordStartBtn = $("recordStartBtn");
+const recordPauseBtn = $("recordPauseBtn");
+const recordStopBtn = $("recordStopBtn");
+const recordStatus = $("recordStatus");
+let recording = false;
+let recordingPaused = false;
 
 let modelPackage = null;
 let modelConfig = null;
@@ -676,3 +685,66 @@ canvas.addEventListener("webglcontextlost", event => {
 });
 
 $("renderStatus").textContent = "Aguardando modelo...";
+
+
+async function startScreenRecording() {
+  if (recording) return;
+  recordStartBtn.disabled = true;
+  recordStatus.textContent = "Solicitando permissão do Android...";
+  try {
+    await ScreenRecorder.start();
+    recording = true;
+    recordingPaused = false;
+    recordStatus.textContent = "● Gravando tela";
+    recordStartBtn.hidden = true;
+    recordPauseBtn.hidden = false;
+    recordStopBtn.hidden = false;
+    recordPauseBtn.textContent = "⏸ Pausar";
+  } catch (error) {
+    recordStatus.textContent = "Não foi possível iniciar: " + (error.message || error);
+  } finally {
+    recordStartBtn.disabled = false;
+  }
+}
+
+async function toggleScreenRecordingPause() {
+  if (!recording) return;
+  try {
+    if (recordingPaused) {
+      await ScreenRecorder.resume();
+      recordingPaused = false;
+      recordPauseBtn.textContent = "⏸ Pausar";
+      recordStatus.textContent = "● Gravando tela";
+    } else {
+      await ScreenRecorder.pause();
+      recordingPaused = true;
+      recordPauseBtn.textContent = "▶ Continuar";
+      recordStatus.textContent = "Gravação pausada";
+    }
+  } catch (error) {
+    recordStatus.textContent = "Erro ao alterar gravação: " + (error.message || error);
+  }
+}
+
+async function stopScreenRecording() {
+  if (!recording) return;
+  recordStopBtn.disabled = true;
+  recordStatus.textContent = "Finalizando vídeo...";
+  try {
+    await ScreenRecorder.stop();
+    recording = false;
+    recordingPaused = false;
+    recordStatus.textContent = "✓ Vídeo salvo na galeria · Filmes/Live2D Vtuber Streaming";
+    recordStartBtn.hidden = false;
+    recordPauseBtn.hidden = true;
+    recordStopBtn.hidden = true;
+  } catch (error) {
+    recordStatus.textContent = "Erro ao salvar vídeo: " + (error.message || error);
+  } finally {
+    recordStopBtn.disabled = false;
+  }
+}
+
+recordStartBtn.addEventListener("click", startScreenRecording);
+recordPauseBtn.addEventListener("click", toggleScreenRecordingPause);
+recordStopBtn.addEventListener("click", stopScreenRecording);
