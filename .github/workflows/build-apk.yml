@@ -2,7 +2,7 @@ name: Build Live2D APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, rebuild-render-face-tracking]
   workflow_dispatch:
 
 jobs:
