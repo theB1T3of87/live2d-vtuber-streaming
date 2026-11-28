@@ -230,6 +230,11 @@ async function startCamera() {
   }
 }
 
+cameraBtn.addEventListener("click", async () => {
+  if (cameraStream) await stopCamera();
+  else await startCamera();
+});
+
 function renderLoop() {
   if (!live2dRenderer) return;
   if (faceTracking?.running && live2dRenderer.model) {
