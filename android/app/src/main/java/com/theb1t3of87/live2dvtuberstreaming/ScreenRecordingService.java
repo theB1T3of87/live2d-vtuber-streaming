@@ -53,7 +53,7 @@ public class ScreenRecordingService extends Service {
             Intent data = (Intent) intent.getParcelableExtra(EXTRA_RESULT_DATA);
             MediaProjectionManager manager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             projection = manager.getMediaProjection(resultCode, data);
-            if (projection == null) throw new IllegalStateException("MediaProjection indisponível.");
+            if (projection == null) throw new IllegalStateException("MediaProjection indisponível.");\n            projection.registerCallback(new MediaProjection.Callback() {\n                @Override public void onStop() {\n                    if (recorder != null) cleanup(true);\n                    stopSelf();\n                }\n            }, new Handler(Looper.getMainLooper()));
 
             DisplayMetrics metrics = new DisplayMetrics();
             WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
