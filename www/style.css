@@ -232,3 +232,31 @@ input[type="range"] {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+
+.recordControls {
+  margin: 14px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: #30263e;
+  border: 1px solid var(--border);
+}
+.recordControls h3 {
+  margin: 4px 0 10px;
+  color: var(--purple);
+  font-size: 15px;
+}
+.recordButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.recordButtons button { margin: 4px; }
+.recordStart { background: #a83e69; }
+.recordStop { background: #75405a; }
+#recordStatus {
+  margin: 8px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
