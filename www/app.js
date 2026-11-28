@@ -1,6 +1,10 @@
 import JSZip from "jszip";
-import { Live2DRenderer } from "./live2d-renderer.js";
-import { FaceTracking } from "./face-tracking.js";
+import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
+
+import { CubismFramework } from "./libs/cubism-framework/live2dcubismframework.js";
+import { CubismMoc } from "./libs/cubism-framework/model/cubismmoc.js";
+import { CubismRenderer_WebGL } from "./libs/cubism-framework/rendering/cubismrenderer_webgl.js";
+import { CubismModelMatrix } from "./libs/cubism-framework/math/cubismmodelmatrix.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -23,11 +27,21 @@ let modelPackage = null;
 let modelConfig = null;
 let modelConfigPath = "";
 let modelName = "";
-let live2dRenderer = null;
-let faceTracking = new FaceTracking();
-let cameraStream = null;
+let frameworkReady = false;
+let renderer = null;
+let moc = null;
+let model = null;
+let modelMatrix = null;
+let gl = null;
 let animationFrame = null;
+let textures = [];
 let zoom = 1;
+
+let faceLandmarker = null;
+let cameraStream = null;
+let lastVideoTime = -1;
+let faceNeutral = null;
+let parameterIndices = new Map();
 
 function normalizePath(path) {
   const parts = [];
@@ -176,18 +190,113 @@ modelInput.addEventListener("change", async () => {
   }
 });
 
-async function createLive2D() {
-  await destroyRenderer();
-  $("renderStatus").textContent = "Inicializando Live2D...";
-  $("renderPlaceholder").hidden = false;
+function initializeFramework() {
+  if (frameworkReady) return;
 
-  live2dRenderer = new Live2DRenderer(canvas, $("renderStatus"));
-  live2dRenderer.setZoom(zoom);
-  await live2dRenderer.load(modelPackage, modelConfig, modelConfigPath);
+  if (!window.Live2DCubismCore) {
+    throw new Error("Live2D Cubism Core não foi carregado.");
+  }
 
-  $("renderPlaceholder").hidden = true;
-  $("renderStatus").textContent = "Live2D ativo";
-  renderLoop();
+  CubismFramework.startUp();
+  CubismFramework.initialize();
+
+  frameworkReady = true;
+}
+
+async function imageFromZip(zip, path) {
+  const file = findZipFile(zip, path);
+
+  if (!file) {
+    throw new Error("Textura não encontrada: " + path);
+  }
+
+  const blob = await file.async("blob");
+
+  if ("createImageBitmap" in window) {
+    return await createImageBitmap(blob);
+  }
+
+  return await new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(blob);
+
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Não foi possível abrir uma textura."));
+    };
+
+    image.src = url;
+  });
+}
+
+function resizeCanvas() {
+  if (!gl || !renderer) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  gl.viewport(0, 0, width, height);
+}
+
+async function createTexture(image, index) {
+  const texture = gl.createTexture();
+
+  if (!texture) {
+    throw new Error("Não foi possível criar uma textura WebGL.");
+  }
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_MIN_FILTER,
+    gl.LINEAR
+  );
+
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_MAG_FILTER,
+    gl.LINEAR
+  );
+
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_WRAP_S,
+    gl.CLAMP_TO_EDGE
+  );
+
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_WRAP_T,
+    gl.CLAMP_TO_EDGE
+  );
+
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    image
+  );
+
+  renderer.bindTexture(index, texture);
+  textures.push(texture);
 }
 
 async function destroyRenderer() {
@@ -195,54 +304,321 @@ async function destroyRenderer() {
     cancelAnimationFrame(animationFrame);
     animationFrame = null;
   }
-  if (live2dRenderer) {
-    await live2dRenderer.dispose();
-    live2dRenderer = null;
+
+  if (gl) {
+    textures.forEach(texture => gl.deleteTexture(texture));
   }
+
+  textures = [];
+  renderer = null;
+  model = null;
+  moc = null;
+  modelMatrix = null;
+  gl = null;
 }
 
-function resizeCanvas() {
-  live2dRenderer?.resize();
+async function createLive2D() {
+  await destroyRenderer();
+
+  $("renderStatus").textContent = "Inicializando Live2D...";
+  $("renderPlaceholder").hidden = false;
+
+  gl = canvas.getContext("webgl", {
+    alpha: true,
+    antialias: true,
+    premultipliedAlpha: true,
+    preserveDrawingBuffer: false
+  });
+
+  if (!gl) {
+    throw new Error("WebGL não está disponível neste dispositivo.");
+  }
+
+  initializeFramework();
+
+  const base = modelConfigPath.slice(
+    0,
+    modelConfigPath.lastIndexOf("/") + 1
+  );
+
+  const references = modelConfig.FileReferences;
+
+  $("renderStatus").textContent = "Carregando modelo...";
+
+  const mocPath = joinPath(base, references.Moc);
+  const mocBuffer = await findZipFile(
+    modelPackage,
+    mocPath
+  ).async("arraybuffer");
+
+  moc = CubismMoc.create(mocBuffer, false);
+
+  if (!moc) {
+    throw new Error("O Cubism não conseguiu abrir o MOC3.");
+  }
+
+  model = moc.createModel();
+
+  if (!model) {
+    throw new Error("Não foi possível criar o modelo Live2D.");
+  }
+
+  parameterIndices.clear();
+
+  for (let i = 0; i < model.getParameterCount(); i++) {
+    const id = model.getParameterId(i).getString();
+    parameterIndices.set(id, i);
+  }
+
+  faceNeutral = null;
+
+  modelMatrix = new CubismModelMatrix(
+    model.getCanvasWidth(),
+    model.getCanvasHeight()
+  );
+
+  modelMatrix.setWidth(2.0);
+  modelMatrix.setCenterPosition(0, 0);
+
+  renderer = new CubismRenderer_WebGL();
+  renderer.initialize(model);
+  renderer.startUp(gl);
+  renderer.setIsPremultipliedAlpha(true);
+
+  $("renderStatus").textContent = "Carregando texturas...";
+
+  for (let i = 0; i < references.Textures.length; i++) {
+    const path = joinPath(base, references.Textures[i]);
+    const image = await imageFromZip(modelPackage, path);
+
+    await createTexture(image, i);
+
+    if (image.close) image.close();
+  }
+
+  resizeCanvas();
+
+  $("renderPlaceholder").hidden = true;
+  $("renderStatus").textContent = "Live2D ativo";
+
+  renderLoop();
+}
+
+
+function setTrackedParameter(id, value, weight = 0.4) {
+  if (!model || !parameterIndices.has(id)) return;
+
+  const index = parameterIndices.get(id);
+  model.setParameterValueByIndex(index, value, weight);
+}
+
+function applyFaceTracking() {
+  if (
+    !faceLandmarker ||
+    !cameraStream ||
+    cameraVideo.readyState < 2 ||
+    cameraVideo.currentTime === lastVideoTime
+  ) return;
+
+  lastVideoTime = cameraVideo.currentTime;
+
+  const result = faceLandmarker.detectForVideo(
+    cameraVideo,
+    performance.now()
+  );
+
+  if (!result.faceLandmarks?.length) {
+    cameraStatus.textContent = "Câmera ativa — procurando rosto...";
+    return;
+  }
+
+  const points = result.faceLandmarks[0];
+
+  const leftEye = points[33];
+  const rightEye = points[263];
+  const nose = points[1];
+
+  if (!leftEye || !rightEye || !nose) return;
+
+  const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+  const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+
+  const eyeDistance = Math.max(
+    Math.hypot(
+      rightEye.x - leftEye.x,
+      rightEye.y - leftEye.y
+    ),
+    0.001
+  );
+
+  const yaw = (nose.x - eyeCenterX) / eyeDistance;
+  const pitch = (nose.y - eyeCenterY) / eyeDistance;
+
+  if (!faceNeutral) {
+    faceNeutral = { yaw, pitch };
+  }
+
+  const roll = Math.atan2(
+    rightEye.y - leftEye.y,
+    rightEye.x - leftEye.x
+  ) * 180 / Math.PI;
+
+  setTrackedParameter(
+    "ParamAngleX",
+    (yaw - faceNeutral.yaw) * 90
+  );
+
+  setTrackedParameter(
+    "ParamAngleY",
+    (pitch - faceNeutral.pitch) * 60
+  );
+
+  setTrackedParameter("ParamAngleZ", roll);
+
+  const categories =
+    result.faceBlendshapes?.[0]?.categories || [];
+
+  const expressions = {};
+
+  for (const item of categories) {
+    expressions[item.categoryName] = item.score;
+  }
+
+  if (expressions.eyeBlinkLeft !== undefined) {
+    setTrackedParameter(
+      "ParamEyeLOpen",
+      1 - expressions.eyeBlinkLeft
+    );
+  }
+
+  if (expressions.eyeBlinkRight !== undefined) {
+    setTrackedParameter(
+      "ParamEyeROpen",
+      1 - expressions.eyeBlinkRight
+    );
+  }
+
+  if (expressions.jawOpen !== undefined) {
+    setTrackedParameter(
+      "ParamMouthOpenY",
+      expressions.jawOpen
+    );
+  }
+
+  cameraStatus.textContent = "Câmera ativa — rosto detectado";
 }
 
 async function stopCamera() {
-  if (faceTracking) await faceTracking.stop(cameraVideo);
-  cameraStream = null;
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+
+  cameraVideo.pause();
+  cameraVideo.srcObject = null;
+
+  if (faceLandmarker) {
+    faceLandmarker.close();
+    faceLandmarker = null;
+  }
+
+  lastVideoTime = -1;
+  faceNeutral = null;
+
   cameraBtn.textContent = "Ativar câmera";
   cameraStatus.textContent = "Câmera desligada";
 }
 
 async function startCamera() {
   cameraBtn.disabled = true;
-  cameraStatus.textContent = "Inicializando rastreamento facial...";
+  cameraStatus.textContent = "Inicializando MediaPipe...";
+
   try {
-    if (!faceTracking) faceTracking = new FaceTracking();
-    cameraStream = await faceTracking.start(cameraVideo, message => {
-      cameraStatus.textContent = message;
+    const vision = await FilesetResolver.forVisionTasks(
+      new URL("./mediapipe/", window.location.href).href
+    );
+
+    faceLandmarker = await FaceLandmarker.createFromOptions(
+      vision,
+      {
+        baseOptions: {
+          modelAssetPath: new URL(
+            "./mediapipe/face_landmarker.task",
+            window.location.href
+          ).href,
+          delegate: "CPU"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        outputFaceBlendshapes: true
+      }
+    );
+
+    cameraStatus.textContent = "Solicitando acesso à câmera...";
+
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      }
     });
+
+    cameraVideo.srcObject = cameraStream;
+    await cameraVideo.play();
+
+    lastVideoTime = -1;
+    faceNeutral = null;
+
     cameraBtn.textContent = "Desativar câmera";
+    cameraStatus.textContent = "Câmera ativa — procurando rosto...";
+
   } catch (error) {
-    console.error("Erro no rastreamento facial:", error);
+    console.error("Erro na câmera:", error);
+
     await stopCamera();
-    cameraStatus.textContent = "Erro na câmera: " + error.message;
+
+    cameraStatus.textContent =
+      "Erro na câmera: " + error.message;
+
   } finally {
     cameraBtn.disabled = false;
   }
 }
 
 cameraBtn.addEventListener("click", async () => {
-  if (cameraStream) await stopCamera();
-  else await startCamera();
+  if (cameraStream) {
+    await stopCamera();
+  } else {
+    await startCamera();
+  }
 });
 
 function renderLoop() {
-  if (!live2dRenderer) return;
-  if (faceTracking?.running && live2dRenderer.model) {
-    faceTracking.update(live2dRenderer.model, null, message => {
-      cameraStatus.textContent = message;
-    });
-  }
-  live2dRenderer.render();
+  if (!gl || !renderer || !model) return;
+
+  resizeCanvas();
+
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  applyFaceTracking();
+  model.update();
+
+  modelMatrix.setWidth(2.0 / zoom);
+  modelMatrix.setCenterPosition(0, 0);
+
+  renderer.setMvpMatrix(modelMatrix);
+  renderer.setRenderState(null, [
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  ]);
+
+  renderer.drawModel();
+
   animationFrame = requestAnimationFrame(renderLoop);
 }
 
@@ -288,9 +664,15 @@ reloadBtn.addEventListener("click", async () => {
 
 zoomRange.addEventListener("input", () => {
   zoom = Number(zoomRange.value) / 100;
-  live2dRenderer?.setZoom(zoom);
 });
 
 window.addEventListener("resize", resizeCanvas);
+
+canvas.addEventListener("webglcontextlost", event => {
+  event.preventDefault();
+
+  $("renderStatus").textContent = "Contexto WebGL perdido";
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+});
 
 $("renderStatus").textContent = "Aguardando modelo...";
